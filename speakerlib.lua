@@ -28,28 +28,20 @@ local function printlog(...)
 end
 
 local function loadSpeakerConfig()
-    print("Loading speaker configuration...")
     local speaker_groups = fs.open(mypath.."/speaker_groups.cfg","r")
     if speaker_groups then
-        print("Found speaker_groups.cfg file")
         local content = speaker_groups.readAll()
         speaker_groups.close()
         if content then
-            print("speaker_groups.cfg content:", content)
             local success, tableData = pcall(textutils.unserialise, content)
             if success and type(tableData) == "table" then
-                print("Successfully parsed speaker configuration")
                 speakerlist = { main = {}, left = {}, right = {} }
                 for group_name, speakers in pairs(tableData) do
                     if speakerlist[group_name] then
-                        print("Processing group:", group_name)
                         for _, speaker_name in ipairs(speakers) do
                             local speaker = peripheral.wrap(speaker_name)
                             if speaker and peripheral.hasType(speaker_name, "speaker") then
                                 table.insert(speakerlist[group_name], speaker)
-                                print("Added speaker:", speaker_name)
-                            else
-                                print("Invalid speaker:", speaker_name)
                             end
                         end
                     end
@@ -59,7 +51,6 @@ local function loadSpeakerConfig()
         end
     end
     
-    print("Using default speaker configuration")
     -- 默认配置：所有扬声器都在main组
     local main_speaker = peripheral.find("speaker")
     speakerlist = { 
@@ -67,15 +58,9 @@ local function loadSpeakerConfig()
         left = {}, 
         right = {}
     }
-    print("Found speakers:")
-    for group, speakers in pairs(speakerlist) do
-        print("  "..group..": "..#speakers.." speakers")
-    end
 end
 
 local function Get_dfpwm_url(INPUT_URL, args)
-    print("Converting URL: "..INPUT_URL)
-    print("Using API: "..API_URL)
     local requestData = {
         input_url = INPUT_URL,
         args = args,
@@ -89,21 +74,16 @@ local function Get_dfpwm_url(INPUT_URL, args)
     )
 
     if not response then 
-        print("HTTP Request Failure: "..(err or "Unknown error"))
         error("HTTP Request Failure: "..(err or "Unknown error")) 
     end
     
     local responseData = textutils.unserializeJSON(response.readAll())
     response.close()
-    
-    print("API Response: "..textutils.serializeJSON(responseData))
 
     if responseData.status ~= "success" then 
-        print("Conversion failed: "..(responseData.error or "Unknown error"))
         error("Conversion failed: "..(responseData.error or "Unknown error")) 
     end
     
-    print("Conversion successful, download URL: "..responseData.download_url)
     return responseData.download_url
 end
 
@@ -123,32 +103,26 @@ local function get_total_duration(url)
 end
 
 local function play_audio_chunk(speakers, buffer)
-    print("play_audio_chunk called")
-    print("Number of speakers:", #speakers)
-    print("Buffer size:", buffer and #buffer or 0)
     if #speakers > 0 and buffer and #buffer > 0 then
-        print("Attempting to play audio chunk")
         for _, speaker in pairs(speakers) do
             local success = false
             while not success and _G.Playopen do
-                print("Calling speaker.playAudio")
                 success = speaker.playAudio(buffer, _G.setVolume)
-                if success then
-                    print("Audio played successfully")
-                else
-                    print("Waiting for speaker_audio_empty event")
+                if not success then
                     os.pullEvent("speaker_audio_empty")
                 end
             end
         end
-    else
-        print("Skipping audio chunk: insufficient speakers or empty buffer")
     end
 end
 
 local cmd = ...
 
 if cmd == "stop" then
+    -- 设置停止标志
+    _G.Playopen = false
+    _G.Playstop = false
+    -- 停止所有扬声器
     local all_speakers = {}
     for _, group in pairs(speakerlist) do
         for _, speaker in pairs(group) do
@@ -323,7 +297,11 @@ elseif cmd == "play" then
             break
         end
 
-        -- 读取音频数据
+        -- 读取音频数据（在读取前再次检查停止标志）
+        if not _G.Playopen then
+            break
+        end
+        
         local main_chunk, left_chunk, right_chunk
         local main_buffer, left_buffer, right_buffer
 
@@ -337,6 +315,11 @@ elseif cmd == "play" then
 
         if right_httpfile then
             right_chunk = right_httpfile.read(chunk_size)
+        end
+        
+        -- 读取后再次检查停止标志
+        if not _G.Playopen then
+            break
         end
 
         -- 检查是否所有通道都没有数据
@@ -386,11 +369,6 @@ elseif cmd == "play" then
         )
         bytes_read = bytes_read + max_chunk_size
         _G.getPlay = bytes_read / 6000
-        
-        if _G.Playprint then
-            term.setCursorPos(1, term.getCursorPos())
-            printlog(("Playing: %ds / %ds"):format(math.floor(_G.getPlay), math.ceil(total_length)))
-        end
     end
 
     -- 关闭HTTP连接
