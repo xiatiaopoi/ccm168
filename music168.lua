@@ -2,9 +2,9 @@
 --*获取程序所在目录
 
 local mypath = "/"..fs.getDir(shell.getRunningProgram())
-if not fs.exists(mypath.."/lib/basalt.lua") then shell.run("wget https://gitee.com/xiatiaopoi/ccm168/blob/master/lib/basalt.lua "..mypath.."/lib/basalt.lua") end
-if not fs.exists(mypath.."/speakerlib.lua") then shell.run("wget https://gitee.com/xiatiaopoi/ccm168/blob/master/speakerlib.lua "..mypath.."/speakerlib.lua") end
-if not fs.exists(mypath.."/MusicLyrics.lua") then shell.run("wget https://gitee.com/xiatiaopoi/ccm168/blob/master/MusicLyrics.lua "..mypath.."/MusicLyrics.lua") end
+if not fs.exists(mypath.."/lib/basalt.lua") then shell.run("wget https://raw.githubusercontent.com/xiatiaopoi/ccm168/refs/heads/master/lib/basalt.lua "..mypath.."/lib/basalt.lua") end
+if not fs.exists(mypath.."/speakerlib.lua") then shell.run("wget https://raw.githubusercontent.com/xiatiaopoi/ccm168/refs/heads/master/speakerlib.lua "..mypath.."/speakerlib.lua") end
+if not fs.exists(mypath.."/MusicLyrics.lua") then shell.run("wget https://raw.githubusercontent.com/xiatiaopoi/ccm168/refs/heads/master/MusicLyrics.lua "..mypath.."/MusicLyrics.lua") end
 
 --*GUI库导入
 basalt = require(mypath.."/lib/basalt")
