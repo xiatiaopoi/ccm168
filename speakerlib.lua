@@ -14,6 +14,11 @@ _G.setVolume = 1     -- 音量控制（0-3）
 local API_URL = "http://newgmapi.liulikeji.cn/api/ffmpeg" -- 远程音频转换API
 local mypath = "/"..fs.getDir(shell.getRunningProgram())
 
+-- 无线通信配置
+local rednet_protocol = "music_player" -- 通信协议名称
+local broadcast_interval = 2 -- 播放状态广播间隔（秒）
+local rednet_enabled = false -- rednet启用状态
+
 -- 扬声器配置
 local speakerlist = {
     main = {},
@@ -21,9 +26,49 @@ local speakerlist = {
     right = {}
 }
 
+-- 初始化rednet通信
+local function initRednet()
+    -- 查找并打开所有无线调制解调器
+    local modem_sides = {"front", "back", "left", "right", "top", "bottom"}
+    for _, side in ipairs(modem_sides) do
+        if peripheral.isPresent(side) and peripheral.getType(side) == "modem" then
+            rednet.open(side)
+            rednet_enabled = true
+            printlog("Rednet initialized on side: " .. side)
+            break
+        end
+    end
+end
+
+-- 关闭rednet通信
+local function closeRednet()
+    if rednet_enabled then
+        rednet.closeAll()
+        rednet_enabled = false
+        printlog("Rednet closed")
+    end
+end
+
 local function printlog(...)
     if _G.Playprint then
         print(...)
+    end
+end
+
+-- 广播播放状态
+local function broadcastPlayState()
+    if rednet_enabled then
+        local play_state = {
+            type = "status",
+            playing = _G.Playopen and not _G.Playstop,
+            paused = _G.Playstop,
+            stopped = not _G.Playopen,
+            current_time = _G.getPlay,
+            total_time = _G.getPlaymax,
+            volume = _G.setVolume,
+            timestamp = os.time()
+        }
+        rednet.broadcast(play_state, rednet_protocol)
     end
 end
 
@@ -46,6 +91,46 @@ local function loadSpeakerConfig()
     end
     
     printlog("Found " .. #speakerlist.main .. " speakers")
+end
+
+-- 处理接收到的rednet消息
+local function handleRednetMessage(id, message, protocol)
+    if protocol == rednet_protocol and type(message) == "table" then
+        if message.type == "command" then
+            -- 处理远程控制命令
+            if message.command == "play" then
+                printlog("Received play command from " .. id)
+                _G.Playstop = false
+            elseif message.command == "pause" then
+                printlog("Received pause command from " .. id)
+                _G.Playstop = true
+            elseif message.command == "stop" then
+                printlog("Received stop command from " .. id)
+                _G.Playopen = false
+            elseif message.command == "volume" then
+                if message.volume then
+                    _G.setVolume = math.max(0, math.min(3, tonumber(message.volume) or _G.setVolume))
+                    printlog("Volume set to " .. _G.setVolume .. " from " .. id)
+                end
+            elseif message.command == "seek" then
+                if message.position then
+                    _G.setPlay = tonumber(message.position) or _G.getPlay
+                    printlog("Seek to " .. _G.setPlay .. "s from " .. id)
+                end
+            end
+        end
+    end
+end
+
+-- 监听rednet消息的协程
+local function rednetListener()
+    while rednet_enabled and _G.Playopen do
+        local id, message, protocol = rednet.receive(rednet_protocol, 0.5)
+        if id then
+            handleRednetMessage(id, message, protocol)
+        end
+        os.sleep(0.1)
+    end
 end
 
 local function Get_dfpwm_url(INPUT_URL, args)
@@ -110,6 +195,10 @@ if cmd == "stop" then
     -- 设置停止标志
     _G.Playopen = false
     _G.Playstop = false
+    
+    -- 发送停止状态
+    broadcastPlayState()
+    
     -- 停止所有扬声器
     local all_speakers = {}
     for _, group in pairs(speakerlist) do
@@ -121,6 +210,9 @@ if cmd == "stop" then
     for _, speaker in pairs(all_speakers) do
         speaker.stop()
     end
+    
+    -- 关闭rednet通信
+    closeRednet()
 elseif cmd == "play" then
     local _, file = ...
     if not file then
@@ -130,6 +222,9 @@ elseif cmd == "play" then
     if not http or not file:match("^https?://") then
         error("Only HTTP/HTTPS URLs are supported", 0)
     end
+
+    -- 初始化rednet通信
+    initRednet()
 
     -- 加载扬声器配置
     loadSpeakerConfig()
@@ -144,8 +239,12 @@ elseif cmd == "play" then
     end
     
     if not has_speakers then
+        closeRednet()
         error("No speakers attached", 0)
     end
+
+    -- 启动rednet监听器协程
+    local rednet_coroutine = coroutine.create(rednetListener)
 
     -- 获取DFPWM转换URL
     local main_dfpwm_url, left_dfpwm_url, right_dfpwm_url
@@ -236,6 +335,7 @@ elseif cmd == "play" then
     end
 
     -- 主播放循环
+    local last_broadcast_time = 0
     while bytes_read < total_size and _G.Playopen do
         -- 检查是否需要设置播放位置
         if _G.setPlay > 0 then
@@ -277,12 +377,33 @@ elseif cmd == "play" then
 
         -- 检查暂停状态
         while _G.Playstop and _G.Playopen do
+            -- 暂停时也需要处理rednet消息和广播状态
+            if rednet_enabled then
+                coroutine.resume(rednet_coroutine)
+                local current_time = os.time()
+                if current_time - last_broadcast_time >= broadcast_interval then
+                    broadcastPlayState()
+                    last_broadcast_time = current_time
+                end
+            end
             os.sleep(0.1)
         end
 
         -- 检查停止状态
         if not _G.Playopen then
             break
+        end
+
+        -- 处理rednet消息
+        if rednet_enabled then
+            coroutine.resume(rednet_coroutine)
+        end
+
+        -- 定期广播播放状态
+        local current_time = os.time()
+        if rednet_enabled and current_time - last_broadcast_time >= broadcast_interval then
+            broadcastPlayState()
+            last_broadcast_time = current_time
         end
 
         -- 读取音频数据（在读取前再次检查停止标志）
@@ -363,6 +484,12 @@ elseif cmd == "play" then
     if main_httpfile then main_httpfile.close() end
     if left_httpfile then left_httpfile.close() end
     if right_httpfile then right_httpfile.close() end
+
+    -- 发送最终播放状态
+    broadcastPlayState()
+
+    -- 关闭rednet通信
+    closeRednet()
 
     if _G.Playprint and _G.Playopen then
         printlog("Playback finished.")
