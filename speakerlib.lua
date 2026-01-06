@@ -28,36 +28,24 @@ local function printlog(...)
 end
 
 local function loadSpeakerConfig()
-    local speaker_groups = fs.open(mypath.."/speaker_groups.cfg","r")
-    if speaker_groups then
-        local content = speaker_groups.readAll()
-        speaker_groups.close()
-        if content then
-            local success, tableData = pcall(textutils.unserialise, content)
-            if success and type(tableData) == "table" then
-                speakerlist = { main = {}, left = {}, right = {} }
-                for group_name, speakers in pairs(tableData) do
-                    if speakerlist[group_name] then
-                        for _, speaker_name in ipairs(speakers) do
-                            local speaker = peripheral.wrap(speaker_name)
-                            if speaker and peripheral.hasType(speaker_name, "speaker") then
-                                table.insert(speakerlist[group_name], speaker)
-                            end
-                        end
-                    end
-                end
-                return
+    -- 自动连接所有扬声器，无需配置文件
+    speakerlist = { main = {}, left = {}, right = {} }
+    
+    -- 获取所有连接的设备名称
+    local device_names = peripheral.getNames()
+    for _, device_name in ipairs(device_names) do
+        -- 检查设备是否为扬声器类型
+        if peripheral.hasType(device_name, "speaker") then
+            -- 将扬声器包装为可用对象
+            local speaker = peripheral.wrap(device_name)
+            if speaker then
+                -- 将所有扬声器添加到main组
+                table.insert(speakerlist.main, speaker)
             end
         end
     end
     
-    -- 默认配置：所有扬声器都在main组
-    local main_speaker = peripheral.find("speaker")
-    speakerlist = { 
-        main = main_speaker and {main_speaker} or {},
-        left = {}, 
-        right = {}
-    }
+    printlog("Found " .. #speakerlist.main .. " speakers")
 end
 
 local function Get_dfpwm_url(INPUT_URL, args)
