@@ -120,10 +120,54 @@ function play_set_1()
     _G.Playopen = false
     _G.Playstop = false
     table_index = play_table_Gui[3]:getItemIndex() 
-    if table_index <= 1 then 
-        play_table_Gui[3]:selectItem(play_table_Gui[3]:getItemCount()) 
-    else 
-        play_table_Gui[3]:selectItem(table_index-1) 
+    local next_index = table_index - 1
+    local has_next = false
+    
+    -- 如果当前是第一首，检查是否有上一页
+    if next_index < 1 then
+        if _G.play_mode_loop then
+            -- 循环模式：检查是否有上一页
+            if _G.playlist_pagination.current_page > 0 then
+                -- 有上一页，加载上一页数据
+                _G.playlist_pagination.current_page = _G.playlist_pagination.current_page - 1
+                
+                -- 调用Search函数加载上一页，传递is_load_more=true参数，避免更新GUI
+                Search(_G.playlist_pagination.playlist_id, GUI[2], "playlist", true)
+                
+                -- 检查新数据是否有效
+                if Search_table and #Search_table > 0 then
+                    -- 更新播放列表数据
+                    play_data_table["play_table"] = Search_table
+                    -- 从上一页的最后一首开始播放
+                    next_index = #Search_table
+                    has_next = true
+                else
+                    -- 没有更多数据，从当前页面最后一首开始
+                    next_index = #play_data_table["play_table"]
+                    has_next = true
+                end
+            else
+                -- 没有上一页，从当前页面最后一首开始
+                next_index = #play_data_table["play_table"]
+                has_next = true
+            end
+        else
+            -- 非循环模式：从当前页面最后一首开始
+            next_index = #play_data_table["play_table"]
+            has_next = true
+        end
+    else
+        has_next = true
+    end
+    
+    -- 更新播放列表GUI的选中索引
+    if has_next and next_index <= #play_data_table["play_table"] then
+        play_table_Gui[3]:selectItem(next_index)
+        -- 更新播放数据并播放
+        local next_song = play_data_table["play_table"][next_index]
+        if next_song then
+            playmusic(next_song["name"], next_song["id"], play_data_table["play_table"], next_index)
+        end
     end
 end
 --音乐-
@@ -133,10 +177,62 @@ function play_set_0()
     _G.Playopen = false
     _G.Playstop = false
     table_index = play_table_Gui[3]:getItemIndex() 
-    if table_index >= play_table_Gui[3]:getItemCount() then 
-        play_table_Gui[3]:selectItem(1) 
-    else 
-        play_table_Gui[3]:selectItem(table_index+1) 
+    local next_index = table_index + 1
+    local has_next = false
+    
+    -- 如果超过列表长度，检查是否需要加载下一页
+    if next_index > #play_data_table["play_table"] then
+        if _G.play_mode_loop then
+            -- 循环模式：检查是否有下一页
+            if _G.playlist_pagination.has_more then
+                -- 有下一页，加载下一页数据
+                _G.playlist_pagination.current_page = _G.playlist_pagination.current_page + 1
+                
+                -- 调用Search函数加载下一页，传递is_load_more=true参数，避免更新GUI
+                Search(_G.playlist_pagination.playlist_id, GUI[2], "playlist", true)
+                
+                -- 检查新数据是否有效
+                if Search_table and #Search_table > 0 then
+                    -- 更新播放列表数据
+                    play_data_table["play_table"] = Search_table
+                    -- 从新页面的第一首开始播放
+                    next_index = 1
+                    has_next = true
+                else
+                    -- 没有更多数据，从当前页面第一首开始
+                    next_index = 1
+                    has_next = true
+                end
+            else
+                -- 没有下一页，从第一页第一首开始
+                _G.playlist_pagination.current_page = 0
+                
+                -- 调用Search函数加载第一页，传递is_load_more=true参数，避免更新GUI
+                Search(_G.playlist_pagination.playlist_id, GUI[2], "playlist", true)
+                
+                if Search_table and #Search_table > 0 then
+                    play_data_table["play_table"] = Search_table
+                    next_index = 1
+                    has_next = true
+                end
+            end
+        else
+            -- 非循环模式：停止播放
+            next_index = 1
+            has_next = true
+        end
+    else
+        has_next = true
+    end
+    
+    -- 更新播放列表GUI的选中索引
+    if has_next and next_index <= #play_data_table["play_table"] then
+        play_table_Gui[3]:selectItem(next_index)
+        -- 更新播放数据并播放
+        local next_song = play_data_table["play_table"][next_index]
+        if next_song then
+            playmusic(next_song["name"], next_song["id"], play_data_table["play_table"], next_index)
+        end
     end
 end
 -- GetmusicUrl函数已被移除，直接使用server_url构建音乐URL
@@ -203,54 +299,8 @@ function utf8len(str)
     return len
 end
 
--- 完整实现printUtf8函数，支持中文显示
--- 基于ComputerCraft UTF-8显示原理
-function printUtf8(text, fgColor, bgColor)
-    -- 保存当前颜色设置
-    local oldFg = term.getTextColor()
-    local oldBg = term.getBackgroundColor()
-    
-    -- 设置新颜色
-    if fgColor then term.setTextColor(fgColor) end
-    if bgColor then term.setBackgroundColor(bgColor) end
-    
-    -- 处理UTF-8字符
-    local i = 1
-    while i <= #text do
-        local c = text:sub(i, i)
-        local byte = string.byte(c)
-        
-        if byte < 128 then
-            -- ASCII字符，直接输出
-            term.write(c)
-            i = i + 1
-        else
-            -- UTF-8字符，处理多字节
-            local length
-            if byte >= 0xC0 and byte < 0xE0 then
-                length = 2
-            elseif byte >= 0xE0 and byte < 0xF0 then
-                length = 3
-            elseif byte >= 0xF0 then
-                length = 4
-            end
-            
-            if length then
-                local utf8char = text:sub(i, i + length - 1)
-                -- 尝试直接输出UTF-8字符
-                term.write(utf8char)
-                i = i + length
-            else
-                -- 无法识别的字符，跳过
-                i = i + 1
-            end
-        end
-    end
-    
-    -- 恢复原颜色设置
-    term.setTextColor(oldFg)
-    term.setBackgroundColor(oldBg)
-end
+-- 从网络加载printUtf8函数，支持更好的中文显示
+printUtf8 = load(http.get("https://git.liulikeji.cn/xingluo/ComputerCraft-Utf8/raw/branch/main/utf8ptrint.lua").readAll())()
 --搜索
 server_url = "https://api.qijieya.cn/meting/"
 -- 网易云音乐官方搜索API
@@ -544,31 +594,49 @@ function Search(input_str,GUI_in,api,is_load_more)
         end
         if kg_a then
             a=2
-            if play_lib_F then play_lib_F:remove() end
-            play_lib_F = GUI_in[3]:addFrame():setPosition(1, 1):setSize("parent.w", "parent.h"):setBackground(colors.white)
-            
-            -- 创建歌曲列表容器（可滚动）
-            local songs_container = play_lib_F:addFrame():setPosition(1, 1):setSize("parent.w", "parent.h - 1"):setBackground(colors.white):setScrollable()
-            
-            -- 添加分页按钮
-            -- 上一页按钮
-            local prevpage_button = play_lib_F:addButton():setPosition("parent.w/2 - 15", "parent.h"):setSize(5, 1):setText("Prev"):setForeground(colors.white):setBackground(colors.orange):hide()
-            -- 下一页按钮
-            local nextpage_button = play_lib_F:addButton():setPosition("parent.w/2 + 10", "parent.h"):setSize(5, 1):setText("Next"):setForeground(colors.white):setBackground(colors.blue):hide()
-            
-            -- 只在歌单搜索时显示分页控件
-            if api == "playlist" then
-                -- 添加页码显示（可点击跳页）
-                local page_info = play_lib_F:addButton():setPosition("parent.w/2 - 3", "parent.h"):setSize(7, 1):setText("page " .. (_G.playlist_pagination.current_page + 1)):setForeground(colors.white):setBackground(colors.gray):onClick(function()
-                    -- 创建页码输入对话框
-                    local dialog = play_lib_F:addFrame():setPosition("parent.w/2 - 10", "parent.h/2 - 2"):setSize(20, 5):setBackground(colors.gray):setForeground(colors.white):setZIndex(10)
-                    dialog:addLabel():setText("Enter page:"):setPosition(2, 1):setForeground(colors.white):setBackground(colors.gray)
-                    
-                    -- 输入框
-                    local page_input = dialog:addInput():setPosition(2, 2):setSize(16, 1):setForeground(colors.black):setBackground(colors.white):onKey(function(self, event, key)
-                        -- 支持Enter键确认
-                        if key == 257 then
-                            local page_num = tonumber(self:getValue())
+            -- 只有在非自动加载模式下才更新GUI
+            if not is_load_more then
+                if play_lib_F then play_lib_F:remove() end
+                play_lib_F = GUI_in[3]:addFrame():setPosition(1, 1):setSize("parent.w", "parent.h"):setBackground(colors.white)
+                
+                -- 创建歌曲列表容器（可滚动）
+                local songs_container = play_lib_F:addFrame():setPosition(1, 1):setSize("parent.w", "parent.h - 1"):setBackground(colors.white):setScrollable()
+                
+                -- 添加分页按钮
+                -- 上一页按钮
+                local prevpage_button = play_lib_F:addButton():setPosition("parent.w/2 - 15", "parent.h"):setSize(5, 1):setText("Prev"):setForeground(colors.white):setBackground(colors.orange):hide()
+                -- 下一页按钮
+                local nextpage_button = play_lib_F:addButton():setPosition("parent.w/2 + 10", "parent.h"):setSize(5, 1):setText("Next"):setForeground(colors.white):setBackground(colors.blue):hide()
+                
+                -- 只在歌单搜索时显示分页控件
+                if api == "playlist" then
+                    -- 添加页码显示（可点击跳页）
+                    local page_info = play_lib_F:addButton():setPosition("parent.w/2 - 3", "parent.h"):setSize(7, 1):setText("page " .. (_G.playlist_pagination.current_page + 1)):setForeground(colors.white):setBackground(colors.gray):onClick(function()
+                        -- 创建页码输入对话框
+                        local dialog = play_lib_F:addFrame():setPosition("parent.w/2 - 10", "parent.h/2 - 2"):setSize(20, 5):setBackground(colors.gray):setForeground(colors.white):setZIndex(10)
+                        dialog:addLabel():setText("Enter page:"):setPosition(2, 1):setForeground(colors.white):setBackground(colors.gray)
+                        
+                        -- 输入框
+                        local page_input = dialog:addInput():setPosition(2, 2):setSize(16, 1):setForeground(colors.black):setBackground(colors.white):onKey(function(self, event, key)
+                            -- 支持Enter键确认
+                            if key == 257 then
+                                local page_num = tonumber(self:getValue())
+                                if page_num and page_num > 0 then
+                                    -- 转换为0-based索引
+                                    _G.playlist_pagination.current_page = page_num - 1
+                                    -- 清除当前显示
+                                    if play_lib_F then play_lib_F:remove() end
+                                    -- 重新加载指定页码
+                                    Search(_G.playlist_pagination.playlist_id, GUI_in, "playlist")
+                                end
+                                -- 关闭对话框
+                                dialog:remove()
+                            end
+                        end)
+                        
+                        -- 确认按钮
+                        local confirm_btn = dialog:addButton():setPosition(2, 4):setSize(7, 1):setText("Confirm"):setForeground(colors.white):setBackground(colors.green):onClick(function()
+                            local page_num = tonumber(page_input:getValue())
                             if page_num and page_num > 0 then
                                 -- 转换为0-based索引
                                 _G.playlist_pagination.current_page = page_num - 1
@@ -579,93 +647,81 @@ function Search(input_str,GUI_in,api,is_load_more)
                             end
                             -- 关闭对话框
                             dialog:remove()
-                        end
+                        end)
+                        
+                        -- 取消按钮
+                        local cancel_btn = dialog:addButton():setPosition(11, 4):setSize(7, 1):setText("Cancel"):setForeground(colors.white):setBackground(colors.red):onClick(function()
+                            dialog:remove()
+                        end)
                     end)
                     
-                    -- 确认按钮
-                    local confirm_btn = dialog:addButton():setPosition(2, 4):setSize(7, 1):setText("Confirm"):setForeground(colors.white):setBackground(colors.green):onClick(function()
-                        local page_num = tonumber(page_input:getValue())
-                        if page_num and page_num > 0 then
-                            -- 转换为0-based索引
-                            _G.playlist_pagination.current_page = page_num - 1
-                            -- 清除当前显示
-                            if play_lib_F then play_lib_F:remove() end
-                            -- 重新加载指定页码
-                            Search(_G.playlist_pagination.playlist_id, GUI_in, "playlist")
-                        end
-                        -- 关闭对话框
-                        dialog:remove()
-                    end)
-                    
-                    -- 取消按钮
-                    local cancel_btn = dialog:addButton():setPosition(11, 4):setSize(7, 1):setText("Cancel"):setForeground(colors.white):setBackground(colors.red):onClick(function()
-                        dialog:remove()
-                    end)
-                end)
-                
-                -- 显示上一页按钮（只有在非第一页时显示）
-                if _G.playlist_pagination.current_page > 0 then
-                    prevpage_button:show()
-                    prevpage_button:onClick(function() 
-                        -- 加载上一页
-                        if _G.playlist_pagination.current_page > 0 then
-                            _G.playlist_pagination.current_page = _G.playlist_pagination.current_page - 1
-                            -- 重新请求上一页数据
-                            Search(_G.playlist_pagination.playlist_id, GUI_in, "playlist")
-                        end
-                    end)
-                end
-                
-                -- 显示下一页按钮
-                if _G.playlist_pagination.has_more then
-                    nextpage_button:show()
-                    nextpage_button:onClick(function() 
-                        -- 加载下一页
-                        _G.playlist_pagination.current_page = _G.playlist_pagination.current_page + 1
-                        Search(_G.playlist_pagination.playlist_id, GUI_in, "playlist")
-                    end)
-                end
-            end
-            
-            for index, value in ipairs(Search_table) do
-                local frame = songs_container:addFrame():setPosition(2, a):setSize("parent.w-2", 3):setBackground(colors.lightBlue):onClick(function() 
-                    -- 如果正在播放，先停止当前播放
-                    if play_data_table["play"] or _G.music168_current_playing_id then 
-                        -- 设置停止标志并发送停止事件
-                        _G.Playopen = false
-                        _G.music168_playopen = false
-                        _G.music168_current_playing_id = nil
-                        play_data_table["play"] = false
-                        -- 发送停止事件，这会中断parallel.waitForAny中的speaker_thread
-                        os.queueEvent("music168_play_stop")
-                        -- 停止扬声器
-                        shell.run(mypath.."/speakerlib.lua stop")
-                        -- 短暂等待，确保停止事件被处理
-                        sleep(0.1)
+                    -- 显示上一页按钮（只有在非第一页时显示）
+                    if _G.playlist_pagination.current_page > 0 then
+                        prevpage_button:show()
+                        prevpage_button:onClick(function() 
+                            -- 加载上一页
+                            if _G.playlist_pagination.current_page > 0 then
+                                _G.playlist_pagination.current_page = _G.playlist_pagination.current_page - 1
+                                -- 重新请求上一页数据
+                                Search(_G.playlist_pagination.playlist_id, GUI_in, "playlist")
+                            end
+                        end)
                     end
-                    -- 显示播放界面
-                    play_Gui_UP:play() 
-                    play_GUI_state = true 
-                    main[1]:disable()
-                    -- 传递当前页面的所有歌曲，以便playtable显示完整列表
-                    playmusic(value["name"], value["id"], Search_table, index)
-                end)
-                local textf = frame:addFrame():setPosition(1, 1):setSize("parent.w", 2)
-                textf:addProgram():setPosition(1, 1):setSize("parent.w + 200", 2):execute(function ()
-                    term.setBackgroundColor(colors.lightGray)
-                    term.clear()
-                    printUtf8(value["name"],colors.white,colors.lightGray)
-                end):injectEvent("char", false, "w"):disable()
-                local song_name = value["name"] or "Unknown Song"
-                local song_id = value["id"] or "Unknown ID"
-                local artists_name = value["artists_name"] or "Unknown Artist"
-                frame:addLabel():setText("🎵 "..song_name.."  [ID:"..song_id.."]  歌手:"..artists_name):setPosition(1, 3):setForeground(colors.black)
-                a=a+4
+                    
+                    -- 显示下一页按钮
+                    if _G.playlist_pagination.has_more then
+                        nextpage_button:show()
+                        nextpage_button:onClick(function() 
+                            -- 加载下一页
+                            _G.playlist_pagination.current_page = _G.playlist_pagination.current_page + 1
+                            Search(_G.playlist_pagination.playlist_id, GUI_in, "playlist")
+                        end)
+                    end
+                end
+                
+                for index, value in ipairs(Search_table) do
+                    local frame = songs_container:addFrame():setPosition(2, a):setSize("parent.w-2", 4):setBackground(colors.lightBlue):onClick(function() 
+                        -- 如果正在播放，先停止当前播放
+                        if play_data_table["play"] or _G.music168_current_playing_id then 
+                            -- 设置停止标志并发送停止事件
+                            _G.Playopen = false
+                            _G.music168_playopen = false
+                            _G.music168_current_playing_id = nil
+                            play_data_table["play"] = false
+                            -- 发送停止事件，这会中断parallel.waitForAny中的speaker_thread
+                            os.queueEvent("music168_play_stop")
+                            -- 停止扬声器
+                            shell.run(mypath.."/speakerlib.lua stop")
+                            -- 短暂等待，确保停止事件被处理
+                            sleep(0.1)
+                        end
+                        -- 显示播放界面
+                        play_Gui_UP:play() 
+                        play_GUI_state = true 
+                        main[1]:disable()
+                        -- 传递当前页面的所有歌曲，以便playtable显示完整列表
+                        playmusic(value["name"], value["id"], Search_table, index)
+                    end)
+                    local textf = frame:addFrame():setPosition(1, 1):setSize("parent.w", 3)
+                    textf:addProgram():setPosition(1, 1):setSize("parent.w + 200", 4):execute(function ()
+                        term.setBackgroundColor(colors.lightGray)
+                        term.clear()
+                        printUtf8(value["name"],colors.white,colors.lightGray)
+                    end):injectEvent("char", false, "w"):disable()
+                    local song_name = value["name"] or "Unknown Song"
+                    local song_id = value["id"] or "Unknown ID"
+                    local artists_name = value["artists_name"] or "Unknown Artist"
+                    frame:addLabel():setText("🎵 "..song_name.."  [ID:"..song_id.."]  歌手:"..artists_name):setPosition(1, 4):setForeground(colors.black)
+                    a=a+5
+                end
             end
             break;
         else
-            frame = GUI_in[3]:addFrame():setPosition(2, 2):setSize("parent.w-2", 3):setBackground(colors.lightBlue)
-            frame:addLabel():setText("No content found"):setPosition(1, 1)
+            -- 只有在非自动加载模式下才更新GUI
+            if not is_load_more then
+                frame = GUI_in[3]:addFrame():setPosition(2, 2):setSize("parent.w-2", 3):setBackground(colors.lightBlue)
+                frame:addLabel():setText("No content found"):setPosition(1, 1)
+            end
             break;
         end
     end
@@ -731,23 +787,58 @@ function thread2()
                     -- 播放完成，自动播放下一首
                     local current_index = play_data_table["play_table_index"]
                     local next_index = current_index + 1
+                    local has_next = false
                     
-                    -- 如果超过列表长度，根据循环模式决定
+                    -- 如果超过列表长度，检查是否需要加载下一页
                     if next_index > #play_data_table["play_table"] then
                         if _G.play_mode_loop then
-                            -- 循环模式：播放第一首
-                            next_index = 1
+                            -- 循环模式：检查是否有下一页
+                            if _G.playlist_pagination.has_more then
+                                -- 有下一页，加载下一页数据
+                                _G.playlist_pagination.current_page = _G.playlist_pagination.current_page + 1
+                                
+                                -- 调用Search函数加载下一页，传递is_load_more=true参数，避免更新GUI
+                                Search(_G.playlist_pagination.playlist_id, GUI[2], "playlist", true)
+                                
+                                -- 检查新数据是否有效
+                                if Search_table and #Search_table > 0 then
+                                    -- 更新播放列表数据
+                                    play_data_table["play_table"] = Search_table
+                                    -- 从新页面的第一首开始播放
+                                    next_index = 1
+                                    has_next = true
+                                else
+                                    -- 没有更多数据，从当前页面第一首开始
+                                    next_index = 1
+                                    has_next = true
+                                end
+                            else
+                                -- 没有下一页，从第一页第一首开始
+                                _G.playlist_pagination.current_page = 0
+                                
+                                -- 调用Search函数加载第一页，传递is_load_more=true参数，避免更新GUI
+                                Search(_G.playlist_pagination.playlist_id, GUI[2], "playlist", true)
+                                
+                                if Search_table and #Search_table > 0 then
+                                    play_data_table["play_table"] = Search_table
+                                    next_index = 1
+                                    has_next = true
+                                end
+                            end
                         else
                             -- 非循环模式：停止播放
                             play_data_table["play"] = false
                             _G.music168_playopen = false
                             _G.music168_music_id = nil
                             _G.music168_current_playing_id = nil
+                            has_next = false
                         end
+                    else
+                        has_next = true
                     end
                     
                     -- 如果还有下一首，播放它
-                    if next_index <= #play_data_table["play_table"] then
+                    if has_next and next_index <= #play_data_table["play_table"] then
                         local next_song = play_data_table["play_table"][next_index]
                         if next_song then
                             -- 停止当前播放
@@ -850,12 +941,44 @@ function speakerp()
                         -- 有播放列表，自动播放下一首
                         local current_index = play_data_table["play_table_index"]
                         local next_index = current_index + 1
+                        local has_next = false
                         
-                        -- 如果超过列表长度，根据循环模式决定
+                        -- 如果超过列表长度，检查是否需要加载下一页
                         if next_index > #play_data_table["play_table"] then
                             if _G.play_mode_loop then
-                                -- 循环模式：播放第一首
-                                next_index = 1
+                                -- 循环模式：检查是否有下一页
+                                if _G.playlist_pagination.has_more then
+                                    -- 有下一页，加载下一页数据
+                                    _G.playlist_pagination.current_page = _G.playlist_pagination.current_page + 1
+                                    
+                                    -- 调用Search函数加载下一页，传递is_load_more=true参数，避免更新GUI
+                                    Search(_G.playlist_pagination.playlist_id, GUI[2], "playlist", true)
+                                    
+                                    -- 检查新数据是否有效
+                                    if Search_table and #Search_table > 0 then
+                                        -- 更新播放列表数据
+                                        play_data_table["play_table"] = Search_table
+                                        -- 从新页面的第一首开始播放
+                                        next_index = 1
+                                        has_next = true
+                                    else
+                                        -- 没有更多数据，从当前页面第一首开始
+                                        next_index = 1
+                                        has_next = true
+                                    end
+                                else
+                                    -- 没有下一页，从第一页第一首开始
+                                    _G.playlist_pagination.current_page = 0
+                                    
+                                    -- 调用Search函数加载第一页，传递is_load_more=true参数，避免更新GUI
+                                    Search(_G.playlist_pagination.playlist_id, GUI[2], "playlist", true)
+                                    
+                                    if Search_table and #Search_table > 0 then
+                                        play_data_table["play_table"] = Search_table
+                                        next_index = 1
+                                        has_next = true
+                                    end
+                                end
                             else
                                 -- 非循环模式：停止播放
                                 _G.music168_playopen = false
@@ -864,14 +987,18 @@ function speakerp()
                                 play_data_table["play"] = false
                                 return
                             end
+                        else
+                            has_next = true
                         end
                         
-                        -- 播放下一首
-                        local next_song = play_data_table["play_table"][next_index]
-                        if next_song then
-                            sleep(0.3)  -- 短暂延迟，确保状态更新
-                            playmusic(next_song["name"], next_song["id"], play_data_table["play_table"], next_index)
-                            return
+                        -- 如果还有下一首，播放它
+                        if has_next and next_index <= #play_data_table["play_table"] then
+                            local next_song = play_data_table["play_table"][next_index]
+                            if next_song then
+                                sleep(0.3)  -- 短暂延迟，确保状态更新
+                                playmusic(next_song["name"], next_song["id"], play_data_table["play_table"], next_index)
+                                return
+                            end
                         end
                     end
                     
